@@ -30,7 +30,7 @@ def find_x_rs_action_RS1(X, Y, tau, dist_metric=euclidean_distances, pow=1):
     # If all points are above or below tau, return a random point
     if len(X_less_than_tau_index) == 0:
         print("Function above tau")
-        # return np.random.choice(N), -np.inf
+        return np.random.choice(N), -np.inf
     elif len(X_more_than_tau_index) == 0:
         print("Function below tau")
         return np.random.choice(N), np.inf

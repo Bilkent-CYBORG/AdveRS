@@ -1,0 +1,11 @@
+[project]
+name = "adve-rs"
+version = "1.0.0"
+description = "Robust Satisficing Gaussian Process Bandits Under Adversarial Attacks (AdveRS) — experiment code"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "gpy>=1.13.2",
+    "matplotlib>=3.10.6",
+    "scikit-learn>=1.7.2",
+]

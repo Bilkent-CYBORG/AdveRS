@@ -1,4 +1,11 @@
 # Files
 .DS_Store
 
-# Folders
+# Python
+__pycache__/
+*.py[oc]
+.venv/
+
+# Experiment outputs
+output_arrays/
+figures/

@@ -15,7 +15,7 @@ def BO_loop_RS(
     attack_mode=0,
     distance_metric=distance.euclidean,
     T=50,
-    beta_t=2,
+    beta=2,
     sigma_noise=1e-10,
     num_iter=1,
     num_init_samples=10,
@@ -24,6 +24,7 @@ def BO_loop_RS(
     r_ro=None,
     epsilon_t=0.1,
     print_samples=False,
+    thompson=False,
 ):
     """
     Bayesian optimization loop.
@@ -62,9 +63,7 @@ def BO_loop_RS(
             acquisition_function, X=X, tau=tau, r_ro=r_ro, dist_metric=distance_metric
         )
     else:
-        acquisition = partial(
-            acquisition_function, X=X, tau=tau, dist_metric=distance_metric
-        )
+        acquisition = partial(acquisition_function, X=X, tau=tau, dist_metric=distance_metric)
 
     # Initialize pertubation budget array
     if isinstance(epsilon_t, (int, float)):
@@ -74,9 +73,7 @@ def BO_loop_RS(
     else:
         Warning("epsilon_t is neither a number nor an array")
 
-    print(
-        f"Starting Bayesian optimization loop with {num_iter} iterations and {T} rounds \n"
-    )
+    print(f"Starting Bayesian optimization loop with {num_iter} iterations and {T} rounds \n")
 
     # Bayesian optimization loop
     for iter in range(num_iter):
@@ -96,13 +93,32 @@ def BO_loop_RS(
         model = GPy.models.GPRegression(
             current_dataset[0], current_dataset[1], kernel, noise_var=sigma_noise**2
         )
-        mu_t, var_t = model.predict(X, include_likelihood=False)
-        sigma_t = np.sqrt(var_t)
 
         for t in range(T):
+            if beta is None:
+                delta = 0.1
+                delta_term = -2 * np.log(delta)
+                lambda_over = max(1, sigma_noise**2)
+                lambda_rat = lambda_over / (sigma_noise**2)
+                det_term = np.linalg.det(
+                    lambda_rat * model.kern.K(model.X) + lambda_over * np.eye(model.X.shape[0])
+                )
+                B = 5
+                beta_t = B + sigma_noise * np.sqrt(np.log(det_term) + delta_term)
+            else:
+                beta_t = beta
+
             # Compute the ucb and lcb for all points
-            ucb_t = mu_t + beta_t * sigma_t
+            mu_t, var_t = model.predict(X, include_likelihood=False)
+            sigma_t = np.sqrt(var_t)
             lcb_t = mu_t - beta_t * sigma_t
+
+            if thompson:
+                # Sample from the posterior distribution for Thompson sampling
+                ucb_t = model.posterior_samples_f(X, size=1)[:, 0]
+            else:
+                # Compute the upper confidence bound
+                ucb_t = mu_t + beta_t * sigma_t
 
             # Find the index of acquisiton point
             index_tilde_x_t, bar_kappa_tau_t = acquisition(Y=ucb_t)
@@ -134,9 +150,7 @@ def BO_loop_RS(
                 )
             elif attack_mode == 3:
                 gaussian_perturbation = (
-                    np.random.multivariate_normal(
-                        np.zeros(X.shape[1]), np.eye(X.shape[1])
-                    )
+                    np.random.multivariate_normal(np.zeros(X.shape[1]), np.eye(X.shape[1]))
                     * epsilon_t[t]
                 )
                 tilde_x_t = X[index_tilde_x_t]
@@ -163,8 +177,6 @@ def BO_loop_RS(
                 Y=current_dataset[1].reshape(-1, 1),
             )
 
-            # Update the GP model predictions
-            mu_t, sigma_t = model.predict(X, include_likelihood=False)
             if print_samples and t % 5 == 0:
                 print("Round: ", t)
                 print(f"X_acquisition: {X[int(current_dataset[2][t])][0]:.3f}")
@@ -185,7 +197,7 @@ def BO_loop_RO(
     attack_mode=0,
     distance_metric=euclidean_distances,
     T=50,
-    beta_t=2,
+    beta=2,
     sigma_noise=1e-10,
     num_iter=1,
     num_init_samples=10,
@@ -239,9 +251,7 @@ def BO_loop_RO(
     else:
         Warning("r_ro is neither a number nor an array")
 
-    print(
-        f"Starting Bayesian optimization loop with {num_iter} iterations and {T} rounds \n"
-    )
+    print(f"Starting Bayesian optimization loop with {num_iter} iterations and {T} rounds \n")
 
     # Bayesian optimization loop
     for iter in range(num_iter):
@@ -261,16 +271,29 @@ def BO_loop_RO(
         model = GPy.models.GPRegression(
             current_dataset[0], current_dataset[1], kernel, noise_var=sigma_noise**2
         )
-        mu_t, var_t = model.predict(X, include_likelihood=False)
-        sigma_t = np.sqrt(var_t)
 
         for t in range(T):
+            if beta is None:
+                delta = 0.1
+                delta_term = -2 * np.log(delta)
+                lambda_over = max(1, sigma_noise**2)
+                lambda_rat = lambda_over / (sigma_noise**2)
+                det_term = np.linalg.det(
+                    lambda_rat * model.kern.K(model.X) + lambda_over * np.eye(model.X.shape[0])
+                )
+                B = 5
+                beta_t = B + sigma_noise * np.sqrt(np.log(det_term) + delta_term)
+            else:
+                beta_t = beta
+
             # Set the acquisition function with radius of RO
             acquisition = partial(
                 find_x_ro_action, X=X, Y=Y, r_ro=r_ro[t], dist_metric=distance_metric
             )
 
             # Compute the ucb and lcb for all points
+            mu_t, var_t = model.predict(X, include_likelihood=False)
+            sigma_t = np.sqrt(var_t)
             ucb_t = mu_t + beta_t * sigma_t
             lcb_t = mu_t - beta_t * sigma_t
 
@@ -304,9 +327,7 @@ def BO_loop_RO(
                 )
             elif attack_mode == 3:
                 gaussian_perturbation = (
-                    np.random.multivariate_normal(
-                        np.zeros(X.shape[1]), np.eye(X.shape[1])
-                    )
+                    np.random.multivariate_normal(np.zeros(X.shape[1]), np.eye(X.shape[1]))
                     * epsilon_t[t]
                 )
                 tilde_x_t = X[index_tilde_x_t]
@@ -333,8 +354,6 @@ def BO_loop_RO(
                 Y=current_dataset[1].reshape(-1, 1),
             )
 
-            # Update the GP model predictions
-            mu_t, sigma_t = model.predict(X, include_likelihood=False)
             if print_samples and t % 5 == 0:
                 print("Round: ", t)
                 print(f"X_acquisition: {X[int(current_dataset[2][t])][0]:.3f}")
@@ -358,7 +377,7 @@ def BO_loop_RO_diabetes(
     fbg_true_inds,
     distance_metric=euclidean_distances,
     T=50,
-    beta_t=2,
+    beta=2,
     sigma_noise=1e-10,
     num_iter=1,
     num_init_samples=10,
@@ -414,9 +433,7 @@ def BO_loop_RO_diabetes(
     else:
         Warning("r_ro is neither a number nor an array")
 
-    print(
-        f"Starting Bayesian optimization loop with {num_iter} iterations and {T} rounds \n"
-    )
+    print(f"Starting Bayesian optimization loop with {num_iter} iterations and {T} rounds \n")
 
     # Bayesian optimization loop
     for iter in range(num_iter):
@@ -436,11 +453,25 @@ def BO_loop_RO_diabetes(
         model = GPy.models.GPRegression(
             current_dataset[0], current_dataset[1], kernel, noise_var=sigma_noise**2
         )
-        mu_t, var_t = model.predict(X, include_likelihood=False)
-        sigma_t = np.sqrt(var_t)
 
         for t in range(T):
+            if beta is None:
+                delta = 0.1
+                delta_term = -2 * np.log(delta)
+                lambda_over = max(1, sigma_noise**2)
+                lambda_rat = lambda_over / (sigma_noise**2)
+                det_term = np.linalg.det(
+                    lambda_rat * model.kern.K(model.X) + lambda_over * np.eye(model.X.shape[0])
+                )
+                B = 5
+                beta_t = B + sigma_noise * np.sqrt(np.log(det_term) + delta_term)
+            else:
+                beta_t = beta
+
             # Compute the ucb and lcb for all points
+            mu_t, var_t = model.predict(X, include_likelihood=False)
+            sigma_t = np.sqrt(var_t)
+            # sigma_t = var_t
             ucb_t = mu_t + beta_t * sigma_t
             lcb_t = mu_t - beta_t * sigma_t
 
@@ -460,14 +491,10 @@ def BO_loop_RO_diabetes(
 
             # True point
             index_x_t = (
-                (index_tilde_ins_t * (m * k))
-                + (C_true_inds[iter, t] * k)
-                + fbg_true_inds[iter, t]
+                (index_tilde_ins_t * (m * k)) + (C_true_inds[iter, t] * k) + fbg_true_inds[iter, t]
             )
             index_x_tilde_t = (
-                (index_tilde_ins_t * (m * k))
-                + (C_ref_inds[iter, t] * k)
-                + fbg_true_inds[iter, t]
+                (index_tilde_ins_t * (m * k)) + (C_ref_inds[iter, t] * k) + fbg_true_inds[iter, t]
             )
 
             # Evaluate the objective function
@@ -487,8 +514,6 @@ def BO_loop_RO_diabetes(
                 Y=current_dataset[1].reshape(-1, 1),
             )
 
-            # Update the GP model predictions
-            mu_t, sigma_t = model.predict(X, include_likelihood=False)
             if print_samples and t % 5 == 0:
                 print("Round: ", t)
                 print(f"X_acquisition: {X[int(current_dataset[2][t])][0]:.3f}")
@@ -513,13 +538,14 @@ def BO_loop_RS_diabetes(
     acquisition_function,
     distance_metric=euclidean_distances,
     T=50,
-    beta_t=2,
+    beta=2,
     sigma_noise=1e-10,
     num_iter=1,
     num_init_samples=10,
     kernel=GPy.kern.RBF(1),
     tau=0.1,
     print_samples=False,
+    thompson=False,
 ):
     """
     Bayesian optimization loop.
@@ -562,13 +588,9 @@ def BO_loop_RS_diabetes(
     to_return = []
 
     # Initialize acquisition function
-    acquisition = partial(
-        acquisition_function, C=C, tau=tau, dist_metric=distance_metric
-    )
+    acquisition = partial(acquisition_function, C=C, tau=tau, dist_metric=distance_metric)
 
-    print(
-        f"Starting Bayesian optimization loop with {num_iter} iterations and {T} rounds \n"
-    )
+    print(f"Starting Bayesian optimization loop with {num_iter} iterations and {T} rounds \n")
 
     # Bayesian optimization loop
     for iter in range(num_iter):
@@ -588,13 +610,33 @@ def BO_loop_RS_diabetes(
         model = GPy.models.GPRegression(
             current_dataset[0], current_dataset[1], kernel, noise_var=sigma_noise**2
         )
-        mu_t, var_t = model.predict(X, include_likelihood=False)
-        sigma_t = np.sqrt(var_t)
 
         for t in range(T):
+            if beta is None:
+                delta = 0.1
+                delta_term = -2 * np.log(delta)
+                lambda_over = max(1, sigma_noise**2)
+                lambda_rat = lambda_over / (sigma_noise**2)
+                det_term = np.linalg.det(
+                    lambda_rat * model.kern.K(model.X) + lambda_over * np.eye(model.X.shape[0])
+                )
+                B = 5
+                beta_t = B + sigma_noise * np.sqrt(np.log(det_term) + delta_term)
+                if (t + 1) % 50 == 0:
+                    print(f"Beta_t at round {t+1}: {beta_t}")
+            else:
+                beta_t = beta
+
             # Compute the ucb and lcb for all points
-            ucb_t = mu_t + beta_t * sigma_t
-            lcb_t = mu_t - beta_t * sigma_t
+            mu_t, var_t = model.predict(X, include_likelihood=False)
+            sigma_t = np.sqrt(var_t)
+            # sigma_t = var_t
+            if thompson:
+                # Sample from the posterior distribution for Thompson sampling
+                ucb_t = model.posterior_samples_f(X, size=1)[:, 0]
+            else:
+                ucb_t = mu_t + beta_t * sigma_t
+                lcb_t = mu_t - beta_t * sigma_t
 
             ucb_t_mat = ucb_t.reshape(n, m, k)
 
@@ -606,14 +648,10 @@ def BO_loop_RS_diabetes(
 
             # True point
             index_x_t = (
-                (index_tilde_ins_t * (m * k))
-                + (C_true_inds[iter, t] * k)
-                + fbg_true_inds[iter, t]
+                (index_tilde_ins_t * (m * k)) + (C_true_inds[iter, t] * k) + fbg_true_inds[iter, t]
             )
             index_x_tilde_t = (
-                (index_tilde_ins_t * (m * k))
-                + (C_ref_inds[iter, t] * k)
-                + fbg_true_inds[iter, t]
+                (index_tilde_ins_t * (m * k)) + (C_ref_inds[iter, t] * k) + fbg_true_inds[iter, t]
             )
 
             # Evaluate the objective function
@@ -633,8 +671,6 @@ def BO_loop_RS_diabetes(
                 Y=current_dataset[1].reshape(-1, 1),
             )
 
-            # Update the GP model predictions
-            mu_t, sigma_t = model.predict(X, include_likelihood=False)
             if print_samples and t % 5 == 0:
                 print("Round: ", t)
                 print(f"X_acquisition: {X[int(current_dataset[2][t])][0]:.3f}")
